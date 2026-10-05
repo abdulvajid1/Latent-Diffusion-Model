@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .config import AutoencoderKLConfig
 
-from .lpips import Lpips
-from .patchgan import PatchGANDiscriminator
+from .lpips import LPIPS
+from .patchgan import NLDiscriminator
 
 
 class EncoderBlock(nn.Module):
@@ -43,8 +43,8 @@ class AutoencoderKL(nn.Module):
         self.bottleneck = DiagonalGuassianDistribution()
         
         self.mse_loss = nn.MSELoss()
-        self.lpips_loss = Lpips()
-        self.patchgan_loss = PatchGANDiscriminator()
+        self.lpips_loss = LPIPS()
+        self.patchgan_loss = NLDiscriminator(img_channels=config.img_channel, start_dim=config.patchgan_start_dim)
         
     def encode(self, x):
         return x
