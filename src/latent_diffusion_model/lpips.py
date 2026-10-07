@@ -62,7 +62,7 @@ class LPIPS(nn.Module):
         return torch.nn.functional.normalize(x, p=2, dim=1, eps=1e-8)
     
     def imagenet_normalize(self, x, eps=1e-8):
-        return (x - self.mean) / (self.std + eps) # normalize on channels dim
+        return (x - self.mean) / (self.std + eps) #type: ignore normalize on channels dim
     
     def forward(self, x0, x1):
         # normalize vgg style
