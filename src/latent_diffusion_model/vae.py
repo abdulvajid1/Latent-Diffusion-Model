@@ -5,18 +5,42 @@ from .config import AutoencoderKLConfig
 
 from .lpips import LPIPS
 from .patchgan import NLDiscriminator
-from .modules import ResidualAttentionLayer
+from .modules import AttentionLayer, ResidualLayer
 from .modules import UpsampleLayer
 from .modules import DownsampleLayer
 
 
 class VAEEncoderBlock(nn.Module):
-    def __init__(self):
+    def __init__(self, 
+                 in_channels, 
+                 out_channels, 
+                 num_res_blocks,
+                 groupnorm_groups=32,
+                 dropout_p=0.0,
+                 add_downsample=True):
         super().__init__()
-        pass
+        self.resblocks = nn.ModuleList()
+        for i in range(num_res_blocks):
+            conv_in_channels = in_channels if i == 0 else out_channels
+            self.resblocks.append(
+                ResidualLayer(
+                    in_channels=conv_in_channels,
+                    out_channels=out_channels,
+                    num_group_groupnorm=groupnorm_groups,
+                    dropout_p=dropout_p,
+                    time_embed_dim=None,
+                    class_embed_dim=None
+                )
+            )
+        
+        self.downsample = DownsampleLayer(in_channels=out_channels) if add_downsample else nn.Identity()
     
     def forward(self, x):
-        pass
+        for module in self.resblocks:
+            x = module(x)
+        
+        return self.downsample(x)
+        
     
 class VAEEncoder(nn.Module):
     def __init__(self, factor):
@@ -36,6 +60,49 @@ class VAEDecoder(nn.Module):
 
 class DiagonalGuassianDistribution(nn.Module):
     pass
+
+
+class ResidualAttentionLayer(nn.Module):
+    def __init__(self, 
+                 in_channels, 
+                 num_layers, 
+                 attention_num_heads=None,
+                 attention_residual_connection: bool=True,
+                 groupnorm_groups=32,
+                 time_emb_dim=None, 
+                 class_emb_dim=None,
+                 ) -> None:
+        super().__init__()
+        self.resnet_blocks = nn.ModuleList()
+        self.attn_blocks = nn.ModuleList()
+        self.resnet_blocks.append(ResidualLayer(in_channels, in_channels, num_group_groupnorm=groupnorm_groups, time_embed_dim=time_emb_dim, class_embed_dim=class_emb_dim))
+        
+        for _ in range(num_layers):
+            self.attn_blocks.append(
+                AttentionLayer(embedding_dim=in_channels, 
+                               num_heads=attention_num_heads, 
+                               num_groups_groupnorm=groupnorm_groups,
+                               residual_connection=attention_residual_connection,
+                               return_dim='2D')
+                )
+            
+            self.resnet_blocks.append(
+                ResidualLayer(in_channels, 
+                              in_channels, 
+                              num_group_groupnorm=groupnorm_groups, 
+                              time_embed_dim=time_emb_dim, 
+                              class_embed_dim=class_emb_dim
+                              )
+            )
+        
+    def forward(self, x, time_embed=None, class_embed=None):
+        x = self.resnet_blocks[0](x, time_embed, class_embed)
+        
+        for attn, resnet in zip(self.attn_blocks, self.resnet_blocks[1:]):
+            x = attn(x)
+            x = resnet(x, time_embed, class_embed)
+        
+        return x
 
 class AutoencoderKL(nn.Module):
     def __init__(self, config: AutoencoderKLConfig):
@@ -80,4 +147,43 @@ class AutoencoderKL(nn.Module):
         
         return generated_x
         
-        
+    
+
+if __name__ == "__main__":
+    x = torch.randn(1, 32, 32, 32)
+    model = ResidualAttentionLayer(
+        in_channels=32,
+        num_layers=2,
+        attention_num_heads=4,
+        attention_residual_connection=True,
+        time_emb_dim=None,
+        class_emb_dim=None,
+        groupnorm_groups=4
+    )
+    print('='*50)
+    print("ResidualAttentionLayer")
+    print('='*50)
+    print(model(x).shape)
+    
+    print('='*50)
+    print("ResidualAttentionLayer with time_embedding")
+    print('='*50)
+    time_embedding = torch.randn(1, 100)
+    model = ResidualAttentionLayer(
+        in_channels=32,
+        num_layers=2,
+        attention_num_heads=4,
+        attention_residual_connection=True,
+        time_emb_dim=100,
+        class_emb_dim=None,
+        groupnorm_groups=4,
+    )
+    print(model(x, time_embedding).shape)
+    
+    print('='*50)
+    print("Encoder Block")
+    model = VAEEncoderBlock(in_channels=32, out_channels=32, num_res_blocks=2, groupnorm_groups=4, dropout_p=0.0, add_downsample=True)
+    print(model(x).shape)
+    print('='*50) 
+    
+    

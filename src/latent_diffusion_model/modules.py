@@ -45,7 +45,6 @@ class AttentionLayer(nn.Module):
         assert self.embedding_dim % self.num_heads == 0, "Embedding size should be divisible by num_heads"
         self.head_dim = self.embedding_dim//self.num_heads
         
-        self.enable_gqa = config.enable_gqa
         self.kv_emb_dim = cross_embedding_dim if cross_embedding_dim else embedding_dim
             
         if num_groups_groupnorm is not None:
@@ -86,7 +85,8 @@ class AttentionLayer(nn.Module):
         attn_emb = F.scaled_dot_product_attention(q, k, v, 
                                                    attn_mask=mask, 
                                                    dropout_p=(self.dropout if self.training else 0.0), 
-                                                   enable_gqa=self.enable_gqa)
+                                                #    enable_gqa=self.enable_gqa
+                                                   )
          
         attn_emb = attn_emb.transpose(-2, -3).contiguous().view(batch_size, seq_len, self.num_heads * self.head_dim)
         out = self.ow(attn_emb)
@@ -120,17 +120,6 @@ class AttentionLayer(nn.Module):
         
         return out
     
-
-class ResidualAttentionLayer(nn.Module):
-    def __init__(self, use_attention: bool = False) -> None:
-        super().__init__()
-        
-        
-    
-    def forward(self, x):
-        pass
-    
-
 class UpsampleLayer(nn.Module):
     def __init__(self, in_channel, with_conv):
         super().__init__()
@@ -153,15 +142,13 @@ class DownsampleLayer(nn.Module):
 
 class ResidualLayer(nn.Module):
     def __init__(self,
-                 in_channels,
-                 out_channels, 
-                 num_group_groupnorm,
-                 dropout_p=0.0,
-                 is_time_embed_proj=None,
-                 time_embed_dim=1280,
-                 is_class_embed_proj=None,
-                 class_embed_dim=512,
-                 norm=1e-6 
+                 in_channels:int,
+                 out_channels:int, 
+                 num_group_groupnorm:int,
+                 dropout_p:float = 0.0,
+                 time_embed_dim:int | None = 1280,
+                 class_embed_dim:int | None = 512,
+                 norm:float = 1e-6 
                  ) -> None:
         super().__init__()
         
@@ -172,11 +159,11 @@ class ResidualLayer(nn.Module):
         self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, stride=1, padding='same')
         
         self.time_embed_proj = None
-        if is_time_embed_proj is not None:
+        if time_embed_dim is not None:
             self.time_embed_proj = nn.Linear(time_embed_dim, out_channels)
             
         self.class_embed_proj = None
-        if is_class_embed_proj is not None:
+        if class_embed_dim is not None:
             self.class_embed_proj = nn.Linear(class_embed_dim, out_channels)
         
         
@@ -259,8 +246,8 @@ if __name__ == "__main__":
     time_embed = torch.randn(1, 100)
     class_embed = torch.randn(1, 100)
     
-    reslayer = ResidualLayer(in_channels=16, out_channels=16, num_group_groupnorm=2)
+    reslayer = ResidualLayer(in_channels=16, out_channels=16, num_group_groupnorm=2, time_embed_dim=None, class_embed_dim=None)
     print("Residual layer output", reslayer(x).shape)
     
-    reslayer = ResidualLayer(in_channels=16, out_channels=16, num_group_groupnorm=2, is_time_embed_proj=True, time_embed_dim=100, is_class_embed_proj=True, class_embed_dim=100)
+    reslayer = ResidualLayer(in_channels=16, out_channels=16, num_group_groupnorm=2, time_embed_dim=100, class_embed_dim=100)
     print("residual layer with class and time at same time", reslayer(x, time_embed, class_embed).shape)
