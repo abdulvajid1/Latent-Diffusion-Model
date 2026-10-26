@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,6 +21,8 @@ class VAEEncoderBlock(nn.Module):
                  dropout_p=0.0,
                  add_downsample=True):
         super().__init__()
+        
+        # Resnet blocks
         self.resblocks = nn.ModuleList()
         for i in range(num_res_blocks):
             conv_in_channels = in_channels if i == 0 else out_channels
@@ -32,7 +36,8 @@ class VAEEncoderBlock(nn.Module):
                     class_embed_dim=None
                 )
             )
-        
+            
+        # Down Block
         self.downsample = DownsampleLayer(in_channels=out_channels) if add_downsample else nn.Identity()
     
     def forward(self, x):
@@ -40,13 +45,125 @@ class VAEEncoderBlock(nn.Module):
             x = module(x)
         
         return self.downsample(x)
+
+class VAEDecoderBlock(nn.Module):
+    def __init__(self, 
+                 in_channel, 
+                 out_channels,
+                 num_groupnorm_groups,
+                 dropout_p,
+                 num_resblocks=1,
+                 add_upsample=True):
+        super().__init__()
+        self.upsampler = UpsampleLayer(in_channel=in_channel, with_conv=False) if add_upsample else nn.Identity()
+        
+        # resenet
+        self.resblocks = nn.ModuleList()
+        for _ in range(num_resblocks):
+            self.resblocks.append(
+                ResidualLayer(
+                    in_channels=in_channel, 
+                    out_channels=out_channels,
+                    num_group_groupnorm=num_groupnorm_groups,
+                    dropout_p=dropout_p,
+                    time_embed_dim=None,
+                    class_embed_dim=None
+                )
+            )
+        
+    def forward(self, x: torch.Tensor):
+        x = self.upsampler(x)
+        
+        for block in self.resblocks:
+            x = block(x)
+        
+        return x
+            
+class VAEAttentionResidualBlock(nn.Module):
+    def __init__(self, 
+                 in_channels,
+                 dropout_p,
+                 num_group_groupnorm,
+                 time_embed_dim=None,
+                 num_blocks=2,
+                 num_head=4,
+                 num_groups_groupnorm=32
+                 ) -> None:
+        super().__init__()
+        self.resnetblocks = nn.ModuleList()
+        self.attnblocks = nn.ModuleList()
+        
+        # there always on resnet at front
+        self.resnetblocks.append(
+            ResidualLayer(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                num_group_groupnorm=num_group_groupnorm,
+                dropout_p=dropout_p,
+                time_embed_dim=time_embed_dim
+            )
+        )
+        
+        for i in range(num_blocks):
+            self.attnblocks.append(
+                AttentionLayer(embedding_dim=in_channels, 
+                               num_heads=4,
+                               num_groups_groupnorm=num_group_groupnorm,
+                               residual_connection=True,
+                               dropout=dropout_p,
+                               return_dim='2D'
+                               )
+            )
+            
+            self.resnetblocks.append(
+                ResidualLayer(in_channels=in_channels,
+                              out_channels=in_channels,
+                              num_group_groupnorm=num_group_groupnorm,
+                              dropout_p=dropout_p,
+                              )
+            )
+        
         
     
 class VAEEncoder(nn.Module):
-    def __init__(self, factor):
+    def __init__(self,
+                 groupnorm_groups,
+                 dropout_p,
+                 num_resblocks=2, 
+                 factors=[64, 128, 256, 256, 512], 
+                 latent_channels=4):
         super().__init__()
-        pass
-    
+        
+        # Encoder Blocks
+        self.encoder_blocks = nn.ModuleList()
+        in_channels = factors[0]
+        
+        for i in range(len(factors) - 1):
+            out_channels = factors[i+1]
+            
+            self.encoder_blocks.append(
+                VAEEncoderBlock(
+                    in_channels=in_channels, 
+                    out_channels=out_channels, 
+                    num_res_blocks=num_resblocks,
+                    groupnorm_groups=groupnorm_groups,
+                    dropout_p=dropout_p,
+                    add_downsample=True
+                )
+            )
+            in_channels = out_channels
+        
+        # Attention Block
+        self.attnblock = VAEAttentionBlock()
+        
+        
+        # Final Block
+        self.final_layer = nn.Conv2d(in_channels=in_channels, 
+                                 out_channels=2*latent_channels, 
+                                 kernel_size=3, 
+                                 stride=1,
+                                 padding='same')
+        
     def forward(self, x):
         pass
 
